@@ -1,0 +1,12 @@
+# Runtime dependencies (Python 3.11). FFmpeg must be installed separately.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+# 1.1.x fixes a crash on silent audio present in 1.0.3 (see docs/PROJECT_AUDIT.md, B1)
+faster-whisper==1.1.1
+# faster-whisper imports requests but newer huggingface_hub no longer pulls it in
+requests>=2.31
+# av 12.3.0 is pinned because newer wheels were blocked by Windows Application
+# Control on the development machine; any version accepted by faster-whisper works elsewhere.
+av==12.3.0

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+backend/.venv/
+backend/.env
+.pytest_cache/
+
+# Runtime data (never commit user media or results)
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/outputs/*
+!backend/outputs/.gitkeep

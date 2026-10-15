@@ -1,0 +1,3 @@
+-r requirements-dev.txt
+# Browser end-to-end test only (drives an installed Chrome/Edge; no browser download needed)
+playwright==1.49.1

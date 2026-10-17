@@ -113,6 +113,18 @@ def probe_media(path: str, timeout: int = 60) -> MediaInfo:
     )
 
 
+def format_duration(seconds: float) -> str:
+    """Human-readable duration for messages: 10 → "10 seconds", 5400 → "90 minutes"."""
+    if seconds < 120:
+        return f"{seconds:.1f} seconds".replace(".0 ", " ")
+    return f"{seconds / 60:.1f} minutes".replace(".0 ", " ")
+
+
+def too_long_message(duration: float, limit: float) -> str:
+    return (f"The media is {format_duration(duration)} long; "
+            f"the maximum is {format_duration(limit)}.")
+
+
 def validate_media(info: MediaInfo, max_duration_seconds: int) -> None:
     """Raise MediaError if probed media cannot be captioned."""
     if not info.has_audio:
@@ -120,10 +132,14 @@ def validate_media(info: MediaInfo, max_duration_seconds: int) -> None:
             "This file has no audio track, so there is nothing to transcribe.",
             code="no_audio_stream",
         )
+    if not info.audio_codec or info.audio_codec == "none":
+        raise MediaError(
+            "The audio in this file uses a codec that cannot be decoded.",
+            code="unsupported_codec",
+        )
     if info.duration is not None and info.duration > max_duration_seconds:
         raise MediaError(
-            f"The media is {info.duration / 60:.1f} minutes long; the maximum is "
-            f"{max_duration_seconds / 60:.0f} minutes.",
+            too_long_message(info.duration, max_duration_seconds),
             code="media_too_long",
         )
 

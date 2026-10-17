@@ -78,6 +78,7 @@ export default function Home() {
         const st = await getStatus(jobId);
         if (stopped) return;
         setStatus(st);
+        setError(null); // connection is fine again
         if (st.status === "done") {
           setResult(await getResult(jobId));
           setPhase("done");
@@ -220,7 +221,7 @@ export default function Home() {
 
       {phase === "done" && result && (
         <>
-          <CaptionEditor key={result.job_id} result={result} mediaUrl={mediaUrl} onSaved={setResult} />
+          <CaptionEditor key={result.job_id} result={result} mediaUrl={mediaUrl} onSaved={setResult} onDeleted={reset} />
           <div className="row">
             <button type="button" className="secondary" onClick={reset}>
               Caption another file

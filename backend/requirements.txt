@@ -1,7 +1,11 @@
 # Runtime dependencies (Python 3.11). FFmpeg must be installed separately.
-fastapi==0.115.6
+# 0.135.0 fixes 7 starlette advisories (incl. CVE-2025-62727 FileResponse Range-header
+# DoS on the unauthenticated subtitle download endpoint) by lifting the starlette<0.42
+# ceiling (pip-audit, 2026-10-17; see docs/VERIFICATION_RESULTS.md).
+fastapi==0.135.0
 uvicorn[standard]==0.34.0
-python-multipart==0.0.20
+# 0.0.31 fixes five multipart-parsing DoS advisories present in 0.0.20 (pip-audit, 2026-10-15)
+python-multipart==0.0.31
 pydantic==2.10.4
 # 1.1.x fixes a crash on silent audio present in 1.0.3 (see docs/PROJECT_AUDIT.md, B1)
 faster-whisper==1.1.1

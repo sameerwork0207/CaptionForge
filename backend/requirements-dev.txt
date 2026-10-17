@@ -1,3 +1,6 @@
 -r requirements.txt
 pytest==8.3.4
 httpx==0.28.1
+# Independent subtitle parsers used to validate exports in tests
+srt==3.5.3
+webvtt-py==0.5.1

@@ -71,7 +71,8 @@ CAPS = [Caption(1, 0.0, 1.5, "Hello, world!\nSecond line."),
 
 def test_srt_roundtrip():
     cues = parse_srt(to_srt(CAPS))
-    assert [c[2] for c in cues] == [c.text for c in CAPS]
+    # SRT has no escape for "-->", so the exporter rewrites it as "->".
+    assert [c[2] for c in cues] == [c.text.replace("-->", "->") for c in CAPS]
     assert cues[1][:2] == (2.0, 4.25)
 
 

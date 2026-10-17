@@ -19,6 +19,7 @@ distributing the segment duration proportionally to word length.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 _SENTENCE_END = re.compile(r"[.?!…。？！]['\"”’)\]]*$")
 _CLAUSE_END = re.compile(r"[,;:，、；：–—]$")
+# Hiragana/Katakana, CJK ideographs, Thai, Lao, Myanmar, Khmer.
+_NO_SPACE_SCRIPT = re.compile(
+    "[぀-ヿ㐀-䶿一-鿿豈-﫿฀-໿က-႟ក-៿]")
 
 
 @dataclass
@@ -57,7 +61,9 @@ def wrap_text(text: str, max_chars: int, max_lines: int) -> Optional[List[str]]:
 
     words = text.split(" ")
     if len(words) == 1:
-        # No spaces (e.g. CJK): split by characters.
+        if not _NO_SPACE_SCRIPT.search(text):
+            return None          # one long Latin/Cyrillic/... word: never break mid-word
+        # Scripts written without spaces (CJK, Thai, ...): split by characters.
         lines = [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
         return lines if len(lines) <= max_lines else None
 
@@ -111,8 +117,11 @@ def _tokens(segments: Sequence[RawSegment]) -> List[Word]:
         for w in words:
             if not w.text.strip():
                 continue
-            start = max(float(w.start), last_start)
-            end = max(float(w.end), start)
+            # Clamp malformed model timings: non-finite or negative values and
+            # timestamps that go backwards are pinned to the previous word.
+            start, end = float(w.start), float(w.end)
+            start = max(start, last_start) if math.isfinite(start) else last_start
+            end = max(end, start) if math.isfinite(end) else start
             tokens.append(Word(text=w.text, start=start, end=end))
             last_start = start
     return tokens

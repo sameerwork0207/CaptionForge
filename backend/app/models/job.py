@@ -67,9 +67,13 @@ class CreateJobResponse(BaseModel):
     status: JobStatus
 
 
+MAX_CAPTION_TIME = 359_999.0   # seconds (99:59:59), the largest two-digit-hour timestamp
+
+
 class CaptionEdit(BaseModel):
-    start: float = Field(..., ge=0)
-    end: float = Field(..., ge=0)
+    # Python's JSON parser accepts NaN/Infinity literals, so reject them explicitly.
+    start: float = Field(..., ge=0, le=MAX_CAPTION_TIME, allow_inf_nan=False)
+    end: float = Field(..., ge=0, le=MAX_CAPTION_TIME, allow_inf_nan=False)
     text: str = Field(..., max_length=1000)
 
 

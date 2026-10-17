@@ -9,8 +9,13 @@ and lets you review and edit them in the browser. You can then export **SRT** or
 - Runs on one machine with no cloud services, database or API keys. The speech model is downloaded once from
   Hugging Face and then cached.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design, [docs/TESTING.md](docs/TESTING.md) for tests, and
-[docs/PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) for the original audit and its resolution.
+Documentation:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the design.
+- [docs/TESTING.md](docs/TESTING.md): how to run the tests.
+- [docs/VERIFICATION_RESULTS.md](docs/VERIFICATION_RESULTS.md): independent verification evidence and accuracy
+  measurements.
+- [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md): known limitations.
+- [docs/PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md): the original audit.
 
 ---
 
@@ -75,6 +80,8 @@ be listed in the backend's `CORS_ORIGINS` (the default allows `http://localhost:
 4. Review the captions next to a preview of your media with the captions overlaid. You can edit text and times,
    insert or delete captions, and jump playback to any caption. Click **Save changes**.
 5. Download **.srt** or **.vtt**. Unsaved edits are saved first.
+6. Optionally delete the job from the server with **Delete from server**. Otherwise it is removed automatically
+   after `JOB_RETENTION_HOURS`.
 
 Reloading the page keeps your job, because the job id is in the URL. The media preview is only available in the
 tab that uploaded the file, because the server deletes uploads after processing.
@@ -110,7 +117,7 @@ instead. GPU inference was **not** verified, because those libraries are absent 
 - The extension is only a first filter. The file must actually be decodable media with at least one audio
   stream. Only the **first** audio stream is transcribed.
 - **Rejected with clear errors:** empty files (`empty_file`), non-media or corrupt files (`corrupt_media`),
-  video without audio (`no_audio_stream`), oversize files (`file_too_large`, 413), media that is too long
+  video without audio (`no_audio_stream`), audio in a codec FFmpeg cannot decode (`unsupported_codec`), oversize files (`file_too_large`, 413), media that is too long
   (`media_too_long`), and unsupported extensions (`unsupported_format`, 415).
 - Silent audio, music without speech, and very short clips complete successfully with **zero captions**.
 
@@ -145,9 +152,9 @@ Job status values: `pending` → `processing` → `done` | `error`. All error re
 ```powershell
 cd backend
 pip install -r requirements-dev.txt
-pytest -m "not model"     # fast: unit + API (mocked model), ~10 s
-pytest                    # everything incl. real model + HTTP E2E (+ browser E2E if Playwright is installed)
-cd ..\frontend; npm test; npm run typecheck
+pytest -m "not model"     # fast: unit, property, contract and API tests (mocked model), ~20 s
+pytest                    # everything incl. real model, HTTP E2E and browser scenarios A–L (~10 min)
+cd ..\frontend; npm test; npm run typecheck; npm run lint; npm run build
 ```
 
 Details, including which tests are mocked and which use the real model, are in [docs/TESTING.md](docs/TESTING.md).
@@ -166,8 +173,13 @@ Details, including which tests are mocked and which use the real model, are in [
 
 ## 11. Known limitations
 
-- Transcription quality depends on the model and the audio. Accuracy was measured only on a synthetic English
-  speech fixture (0 % WER with `base`), **not** on real-world recordings, accents, noise or music.
+The complete list is in [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md). The most important points:
+
+- Transcription quality depends on the model and the audio. With `base`: 0 % WER on a synthetic English speech
+  fixture, and 9.0 % WER / 4.3 % CER on a human read-English sample (one speaker, clean audio; see
+  [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)). WER rises sharply with background noise. Accents,
+  spontaneous/conversational speech, multiple speakers, music and non-English languages have **not** been
+  measured against reference transcripts.
 - Word timestamps are Whisper estimates, not forced alignment; expect occasional offsets of a few hundred
   milliseconds.
 - There is no speaker diarization; captions do not mark speaker changes.

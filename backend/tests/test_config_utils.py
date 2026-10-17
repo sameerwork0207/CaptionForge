@@ -67,3 +67,10 @@ def test_unknown_model_name_maps_to_actionable_error(tmp_path):
     with pytest.raises(ModelUnavailableError, match="Unknown Whisper model"):
         mm.get()
     assert not mm.loaded
+
+
+def test_long_filename_keeps_extension():
+    """Regression D8: truncation used to cut off the extension → valid file rejected (415)."""
+    name = display_filename("a" * 400 + ".wav")
+    assert name.endswith(".wav") and len(name) == 200
+    assert display_filename("b" * 400).startswith("b") and len(display_filename("b" * 400)) == 200

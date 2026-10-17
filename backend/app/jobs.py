@@ -54,8 +54,28 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _parse_time(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def _caption_dicts(captions: List[Caption]) -> List[dict]:
     return [{"index": c.index, "start": c.start, "end": c.end, "text": c.text} for c in captions]
+
+
+INTERRUPTED_ERROR = {"code": "interrupted",
+                     "message": "Processing was interrupted by a server restart. "
+                                "Please upload the file again."}
+
+
+class JobNotFoundError(CaptionForgeError):
+    code = "not_found"
+    http_status = 404
 
 
 class QueueFullError(CaptionForgeError):
@@ -73,6 +93,7 @@ class JobManager:
         self._cancel: set[str] = set()
         self._lock = threading.RLock()
         self._queue: "queue.Queue[Optional[str]]" = queue.Queue()
+        self._stopping = False
         self._worker: Optional[threading.Thread] = None
 
     # ── paths ────────────────────────────────────────────────────────────────
@@ -96,30 +117,58 @@ class JobManager:
         self._worker.start()
 
     def stop(self, timeout: float = 5.0) -> None:
+        """
+        Graceful shutdown: the in-flight job stops at its next segment and is
+        recorded as ``interrupted``; pending jobs are left untouched on disk and
+        are marked ``interrupted`` by ``_recover`` at the next start.
+        """
+        self._stopping = True
         if self._worker and self._worker.is_alive():
-            with self._lock:
-                self._cancel.update(self._order)
-                self._cancel.update(j for j, r in self._jobs.items()
-                                    if r["status"] == JobStatus.PROCESSING.value)
             self._queue.put(None)
             self._worker.join(timeout)
+
+    @staticmethod
+    def _sanitize_record(record: Any, dir_name: str) -> Optional[Dict[str, Any]]:
+        """Return a usable job record, or None if the persisted data is malformed."""
+        if not isinstance(record, dict) or record.get("job_id") != dir_name \
+                or not is_valid_job_id(dir_name):
+            return None
+        if record.get("status") not in {s.value for s in JobStatus}:
+            return None
+        segments = record.get("segments")
+        if segments is not None:
+            if not isinstance(segments, list):
+                return None
+            for s in segments:
+                if not (isinstance(s, dict) and isinstance(s.get("text"), str)
+                        and all(isinstance(s.get(k), (int, float)) and not isinstance(s.get(k), bool)
+                                for k in ("index", "start", "end"))):
+                    return None
+        if record.get("error") is not None and not (
+                isinstance(record["error"], dict)
+                and isinstance(record["error"].get("code"), str)
+                and isinstance(record["error"].get("message"), str)):
+            return None
+        if _parse_time(record.get("finished_at")) is None and record.get("finished_at") is not None:
+            record["finished_at"] = _now()        # unparsable → expire from now
+        return record
 
     def _recover(self) -> None:
         """Load persisted jobs; mark interrupted ones; remove orphaned uploads."""
         for meta in self.settings.output_dir.glob("*/job.json"):
             try:
-                record = json.loads(meta.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
+                raw = json.loads(meta.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 logger.warning("Skipping unreadable job record %s: %s", meta, exc)
                 continue
-            job_id = record.get("job_id", "")
-            if not is_valid_job_id(job_id):
+            record = self._sanitize_record(raw, meta.parent.name)
+            if record is None:
+                logger.warning("Skipping malformed job record %s", meta)
                 continue
-            if record.get("status") in _ACTIVE:
+            job_id = record["job_id"]
+            if record["status"] in _ACTIVE:
                 record.update(status=JobStatus.ERROR.value, stage=None, finished_at=_now(),
-                              error={"code": "interrupted",
-                                     "message": "Processing was interrupted by a server "
-                                                "restart. Please upload the file again."})
+                              error=dict(INTERRUPTED_ERROR))
                 self._jobs[job_id] = record
                 self._persist(job_id)
             else:
@@ -142,8 +191,8 @@ class JobManager:
         expired = []
         with self._lock:
             for job_id, rec in self._jobs.items():
-                fin = rec.get("finished_at")
-                if rec["status"] not in _ACTIVE and fin and datetime.fromisoformat(fin) < cutoff:
+                fin = _parse_time(rec.get("finished_at"))
+                if rec["status"] not in _ACTIVE and fin and fin < cutoff:
                     expired.append(job_id)
         for job_id in expired:
             self.delete(job_id)
@@ -233,8 +282,8 @@ class JobManager:
     def update_captions(self, job_id: str, captions: List[Caption]) -> Dict[str, Any]:
         with self._lock:
             rec = self._jobs.get(job_id)
-            if rec is None:
-                raise KeyError(job_id)
+            if rec is None:      # deleted between the route's lookup and now
+                raise JobNotFoundError(f"Job '{job_id}' not found.")
             self._write_exports(job_id, captions)
             self._update(job_id, segments=_caption_dicts(captions), edited=True)
             return copy.deepcopy(self._jobs[job_id])
@@ -251,8 +300,8 @@ class JobManager:
             except queue.Empty:
                 self.purge_expired()
                 continue
-            if job_id is None:
-                return
+            if job_id is None or self._stopping:
+                return            # pending jobs stay on disk; recovered as interrupted
             with self._lock:
                 if job_id not in self._jobs or job_id not in self._order:
                     continue          # deleted while queued
@@ -271,7 +320,7 @@ class JobManager:
                 on_stage=lambda s: self._update(job_id, stage=s),
                 on_progress=lambda p: self._update(job_id, persist=False,
                                                    progress=round(p, 3)),
-                should_cancel=lambda: job_id in self._cancel,
+                should_cancel=lambda: self._stopping or job_id in self._cancel,
             )
             with self._lock:
                 if job_id not in self._jobs:
@@ -285,10 +334,17 @@ class JobManager:
                              segments=_caption_dicts(result.captions))
             logger.info("Job %s completed: %d captions", job_id, len(result.captions))
         except JobCancelledError:
-            logger.info("Job %s cancelled.", job_id)
             with self._lock:
-                self._jobs.pop(job_id, None)
-            shutil.rmtree(self.output_dir(job_id), ignore_errors=True)
+                user_cancelled = job_id in self._cancel or job_id not in self._jobs
+            if user_cancelled:
+                logger.info("Job %s cancelled.", job_id)
+                with self._lock:
+                    self._jobs.pop(job_id, None)
+                shutil.rmtree(self.output_dir(job_id), ignore_errors=True)
+            else:   # server shutdown: keep the record so clients see why it stopped
+                logger.info("Job %s interrupted by shutdown.", job_id)
+                self._update(job_id, status=JobStatus.ERROR.value, stage=None,
+                             finished_at=_now(), error=dict(INTERRUPTED_ERROR))
         except CaptionForgeError as exc:
             logger.warning("Job %s failed [%s]: %s", job_id, exc.code, exc.message)
             self._update(job_id, status=JobStatus.ERROR.value, stage=None,

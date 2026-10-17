@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { ServerConfig } from "@/lib/api";
+import { formatDuration } from "@/lib/format";
 
 interface Props {
   config: ServerConfig | null;
@@ -101,7 +102,7 @@ export default function UploadPanel({ config, busy, uploadProgress, onSubmit, on
         )}
         <p className="muted small">
           {config
-            ? `Supported: ${config.supported_extensions.join(" ")} · up to ${config.max_upload_mb} MB · up to ${Math.round(config.max_duration_seconds / 60)} min`
+            ? `Supported: ${config.supported_extensions.join(" ")} · up to ${config.max_upload_mb} MB · up to ${formatDuration(config.max_duration_seconds)}`
             : "Loading server limits…"}
         </p>
       </div>
@@ -127,7 +128,14 @@ export default function UploadPanel({ config, busy, uploadProgress, onSubmit, on
 
         {uploadProgress !== null ? (
           <div className="grow">
-            <div className="progress" aria-label="Upload progress">
+            <div
+              className="progress"
+              role="progressbar"
+              aria-label="Upload progress"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(uploadProgress * 100)}
+            >
               <div style={{ width: `${Math.round(uploadProgress * 100)}%` }} />
             </div>
             <div className="row tight">

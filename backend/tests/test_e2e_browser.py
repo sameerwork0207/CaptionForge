@@ -65,8 +65,13 @@ def stack(tmp_path_factory):
 
     env = {**os.environ, "NEXT_PUBLIC_API_BASE_URL": backend.url, "NEXT_DIST_DIR": ".next-e2e",
            "NEXT_TELEMETRY_DISABLED": "1"}
-    build = subprocess.run([NPX, "next", "build"], cwd=FRONTEND, env=env, capture_output=True,
-                           text=True, timeout=600, shell=os.name == "nt")
+    tsconfig = FRONTEND / "tsconfig.json"
+    original = tsconfig.read_bytes()       # next build adds custom distDirs to tsconfig.json
+    try:
+        build = subprocess.run([NPX, "next", "build"], cwd=FRONTEND, env=env, capture_output=True,
+                               text=True, timeout=600, shell=os.name == "nt")
+    finally:
+        tsconfig.write_bytes(original)
     assert build.returncode == 0, build.stdout[-3000:] + build.stderr[-3000:]
     fe_log = open(tmp / "frontend.log", "w")
     fe = subprocess.Popen([NPX, "next", "start", "-p", str(fe_port), "-H", "127.0.0.1"],
@@ -87,6 +92,7 @@ def stack(tmp_path_factory):
     else:
         fe.terminate()
     backend.stop()
+    shutil.rmtree(FRONTEND / ".next-e2e", ignore_errors=True)
 
 
 def _shot(page, name):

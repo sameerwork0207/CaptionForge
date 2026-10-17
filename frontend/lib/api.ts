@@ -113,6 +113,45 @@ export const saveSegments = (id: string, segments: { start: number; end: number;
 export const downloadUrl = (id: string, format: "srt" | "vtt") =>
   `${API_BASE}/api/download/${id}?format=${format}`;
 
+/** Filename from a Content-Disposition header (plain or RFC 5987 form). */
+export function dispositionFilename(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const star = /filename\*=utf-8''([^;]+)/i.exec(header);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1]);
+    } catch {
+      /* fall through */
+    }
+  }
+  const plain = /filename="([^"]+)"/i.exec(header);
+  return plain ? plain[1] : fallback;
+}
+
+/**
+ * Download a subtitle file. Fetching first (instead of navigating to the URL)
+ * means a server error is shown in the page rather than replacing the app
+ * with a raw JSON error.
+ */
+export async function downloadFile(id: string, format: "srt" | "vtt"): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(downloadUrl(id, format), { cache: "no-store" });
+  } catch {
+    throw new ApiError(`Cannot reach the CaptionForge server at ${API_BASE}.`, 0, "network_error");
+  }
+  if (!res.ok) throw await parseError(res);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = dispositionFilename(res.headers.get("Content-Disposition"), `captions.${format}`);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 /**
  * Upload with progress reporting (fetch cannot report upload progress).
  * Resolves with the new job id.

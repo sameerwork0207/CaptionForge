@@ -34,7 +34,8 @@ def _load_dotenv(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def _int(env: dict, name: str, default: int, minimum: int = 0) -> int:
+def _int(env: dict, name: str, default: int, minimum: int = 0,
+         maximum: Optional[int] = None) -> int:
     raw = env.get(name)
     if raw is None or raw == "":
         return default
@@ -44,6 +45,8 @@ def _int(env: dict, name: str, default: int, minimum: int = 0) -> int:
         raise ConfigError(f"{name} must be an integer, got {raw!r}")
     if value < minimum:
         raise ConfigError(f"{name} must be >= {minimum}, got {value}")
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"{name} must be <= {maximum}, got {value}")
     return value
 
 
@@ -133,7 +136,8 @@ def load_settings(env: Optional[dict] = None) -> Settings:
         upload_dir=_path(env, "UPLOAD_DIR", BACKEND_DIR / "uploads"),
         output_dir=_path(env, "OUTPUT_DIR", BACKEND_DIR / "outputs"),
         max_upload_mb=_int(env, "MAX_UPLOAD_MB", 500, minimum=1),
-        max_duration_seconds=_int(env, "MAX_DURATION_SECONDS", 3 * 3600, minimum=1),
+        max_duration_seconds=_int(env, "MAX_DURATION_SECONDS", 3 * 3600, minimum=1,
+                                  maximum=99 * 3600),
         ffmpeg_timeout_seconds=_int(env, "FFMPEG_TIMEOUT_SECONDS", 600, minimum=5),
         whisper_model=env.get("WHISPER_MODEL", "base").strip(),
         whisper_device=device,

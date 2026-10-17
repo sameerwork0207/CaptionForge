@@ -32,7 +32,14 @@ export default function JobProgress({
         {status.queue_position ? ` (position ${status.queue_position})` : ""}
         {stage === "transcribing" && pct > 0 ? ` — ${pct}%` : "…"}
       </p>
-      <div className={`progress${indeterminate ? " indeterminate" : ""}`}>
+      <div
+        className={`progress${indeterminate ? " indeterminate" : ""}`}
+        role="progressbar"
+        aria-label="Processing progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={indeterminate ? undefined : pct}
+      >
         <div style={{ width: indeterminate ? "30%" : `${pct}%` }} />
       </div>
       <p className="muted small">

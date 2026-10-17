@@ -48,9 +48,8 @@ def run_pipeline(
     duration = audio_svc.wav_duration(wav_path)
     if duration > settings.max_duration_seconds:
         # Containers that do not report duration are only checked here.
-        raise MediaError(
-            f"The media is {duration / 60:.1f} minutes long; the maximum is "
-            f"{settings.max_duration_seconds / 60:.0f} minutes.", code="media_too_long")
+        raise MediaError(audio_svc.too_long_message(duration, settings.max_duration_seconds),
+                         code="media_too_long")
     if should_cancel():
         raise JobCancelledError("The job was cancelled.")
 

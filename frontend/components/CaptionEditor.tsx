@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { activeCueIndex, formatTime, parseTime, toVtt, validateCues, type Cue } from "@/lib/captions";
-import { downloadUrl, saveSegments, type ResultResponse } from "@/lib/api";
+import { deleteJob, downloadFile, saveSegments, type ResultResponse } from "@/lib/api";
 
 interface Row extends Cue {
   key: number;
@@ -25,31 +25,38 @@ export default function CaptionEditor({
   result,
   mediaUrl,
   onSaved,
+  onDeleted,
 }: {
   result: ResultResponse;
   mediaUrl: string | null;
   onSaved: (r: ResultResponse) => void;
+  onDeleted: () => void;
 }) {
   const [rows, setRows] = useState<Row[]>(() => toRows(result));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [current, setCurrent] = useState(-1);
   const mediaRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
 
-  const cues: Cue[] = rows.map((r) => ({
-    start: parseTime(r.startText) ?? Number.NaN,
-    end: parseTime(r.endText) ?? Number.NaN,
-    text: r.text,
-  }));
+  const cues: Cue[] = useMemo(
+    () =>
+      rows.map((r) => ({
+        start: parseTime(r.startText) ?? Number.NaN,
+        end: parseTime(r.endText) ?? Number.NaN,
+        text: r.text,
+      })),
+    [rows],
+  );
   const problems = validateCues(cues);
 
   // Live caption preview on the media element via a WebVTT blob track.
   const vttUrl = useMemo(() => {
     if (!mediaUrl) return null;
     return URL.createObjectURL(new Blob([toVtt(cues)], { type: "text/vtt" }));
-  }, [mediaUrl, JSON.stringify(cues)]);
+  }, [mediaUrl, cues]);
   useEffect(() => () => {
     if (vttUrl) URL.revokeObjectURL(vttUrl);
   }, [vttUrl]);
@@ -105,8 +112,24 @@ export default function CaptionEditor({
   };
 
   const download = async (fmt: "srt" | "vtt") => {
+    setActionError(null);
     if (dirty && !(await save())) return;
-    window.location.href = downloadUrl(result.job_id, fmt);
+    try {
+      await downloadFile(result.job_id, fmt);
+    } catch (e) {
+      setActionError(`Download failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const removeJob = async () => {
+    if (!window.confirm("Delete this job and its captions from the server? This cannot be undone.")) return;
+    setActionError(null);
+    try {
+      await deleteJob(result.job_id);
+      onDeleted();
+    } catch (e) {
+      setActionError(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const MediaTag = result.has_video ? "video" : "audio";
@@ -121,6 +144,9 @@ export default function CaptionEditor({
           </button>
           <button type="button" className="secondary" onClick={() => download("vtt")} disabled={saving || problems.length > 0}>
             Download .vtt
+          </button>
+          <button type="button" className="secondary danger" onClick={removeJob} disabled={saving}>
+            Delete from server
           </button>
         </div>
       </div>
@@ -220,6 +246,11 @@ export default function CaptionEditor({
           ))}
           {problems.length > 5 && <li>…and {problems.length - 5} more</li>}
         </ul>
+      )}
+      {actionError && (
+        <p className="error" role="alert">
+          {actionError}
+        </p>
       )}
       {saveError && (
         <p className="error" role="alert">

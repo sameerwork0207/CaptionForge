@@ -51,3 +51,21 @@ test("activeCueIndex", () => {
   assert.equal(activeCueIndex(cues, 1.5), -1);
   assert.equal(activeCueIndex(cues, 2), 1);
 });
+
+test("formatDuration", async () => {
+  const { formatDuration } = await import("./format.ts");
+  assert.equal(formatDuration(10), "10 s");
+  assert.equal(formatDuration(119), "119 s");
+  assert.equal(formatDuration(5400), "90 min");
+  assert.equal(formatDuration(10800), "3 h");
+  assert.equal(formatDuration(12600), "210 min");
+});
+
+test("dispositionFilename", async () => {
+  const { dispositionFilename } = await import("./api.ts");
+  assert.equal(dispositionFilename('attachment; filename="a.srt"', "x"), "a.srt");
+  assert.equal(dispositionFilename("attachment; filename*=utf-8''Lecture_%28draft%29.srt", "x"), "Lecture_(draft).srt");
+  assert.equal(dispositionFilename("attachment; filename*=utf-8''vid%C3%A9o.vtt", "x"), "vidéo.vtt");
+  assert.equal(dispositionFilename(null, "captions.srt"), "captions.srt");
+  assert.equal(dispositionFilename("attachment; filename*=utf-8''%E0%A4%A", "fallback"), "fallback");
+});

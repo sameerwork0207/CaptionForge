@@ -46,13 +46,18 @@ independent queues and models, so it is not supported.
 Each status change writes `outputs/<id>/job.json` atomically (temp file + `os.replace`). At startup, finished
 jobs are reloaded. Jobs that were pending or processing are marked `error/interrupted`, because their upload is
 gone and resuming is not attempted, and orphaned upload directories are removed. Only names that are valid job
-UUIDs are ever deleted.
+UUIDs are ever deleted. Records are validated on load; a malformed `job.json` (wrong id, unknown status, broken
+segments, invalid JSON) is skipped with a warning instead of preventing startup.
+**Graceful shutdown** (Ctrl+C) stops the in-flight job at its next segment and records it as
+`error/interrupted`. Pending jobs are not started; they stay on disk and become `interrupted` at the next start.
+A hard kill leads to the same end state through recovery.
 **Alternatives:** SQLite would add schema and migrations for a handful of fields; a pure in-memory dict
 (original) loses everything on restart. Neither was justified for this scope.
 
 ### Media handling: FFmpeg via `subprocess` (removed `ffmpeg-python`)
 Direct argument lists (no shell), `-nostdin`, timeouts, `-map 0:a:0`. ffprobe JSON is used for validation,
-and attached cover art is not counted as video. FFmpeg's stderr is logged server-side only. Clients receive
+and attached cover art is not counted as video. An audio stream for which FFmpeg has no decoder is rejected at
+upload (`unsupported_codec`). FFmpeg's stderr is logged server-side only. Clients receive
 short messages with stable codes, which fixes the original leak of the FFmpeg banner and server paths.
 `ffmpeg-python` was unused and is unmaintained, so it was dropped.
 
@@ -79,7 +84,10 @@ timestamps; if those are missing, word times are estimated proportionally to wor
 - A new cue starts when there is a pause ≥ 0.6 s, a sentence end once the cue has ≥ ½ line of text, or the
   text no longer fits in 2 × 42 characters, or the cue would exceed 7 s. On overflow, a break after a clause
   comma in the second half of the cue is preferred.
-- Lines are balanced across two lines. Text without spaces (e.g. CJK) is split by characters.
+- Lines are balanced across two lines. Scripts written without spaces (CJK, Thai, …) are split by characters;
+  a single over-long Latin word is never broken mid-word.
+- Malformed model timings (NaN/∞, negative, backwards) are clamped to the previous word, so output stays valid.
+  This is verified by seeded property tests over 300 random word streams, including hostile timing data.
 - Timing: the end time is extended toward ≥ 1 s and ≤ 17 characters per second, but never closer than 50 ms to
   the next cue. A final pass guarantees monotonic, non-overlapping, strictly positive cues at millisecond
   precision.
@@ -87,16 +95,20 @@ timestamps; if those are missing, word times are estimated proportionally to wor
 - No LLM is used. Rules are transparent and testable.
 
 ### Exports (`services/subtitles.py`)
-SRT and WebVTT, UTF-8 without a BOM, LF line endings. Milliseconds are rounded *before* splitting into fields,
-which fixes the original `00:00:59,1000` bug. Cues are renumbered, blank lines inside cue text are removed
-(they would terminate a cue), and `& < >` / `-->` are escaped in VTT. ASS was not added because no requirement
+SRT and WebVTT, UTF-8 without a BOM, LF line endings. Milliseconds are rounded half-up *before* splitting into
+fields (the frontend uses the same rule), which fixes the original `00:00:59,1000` bug. Times are clamped to
+99:59:59.999. Cues are renumbered and blank lines inside cue text are removed (they would terminate a cue).
+`& < >` and `-->` are escaped in VTT. SRT has no escaping, so a literal `-->` is written as `->`. Exports are
+validated in tests by the independent `srt` and `webvtt-py` parsers and by Chrome's own WebVTT parser. ASS was not added because no requirement
 needs styled subtitles.
 
 ### Frontend (`frontend/`)
 Next.js 15 App Router with a single client page, TypeScript, plain CSS (light/dark, responsive), and no UI
 library.
 - `lib/api.ts`: a typed client. Upload uses XHR to report upload progress, and errors surface the backend's
-  `detail`/`code`.
+  `detail`/`code`. Downloads are fetched as a blob first, so a server error is shown in the page instead of
+  replacing the app. Its interfaces are checked against the backend's OpenAPI schemas by
+  `tests/test_frontend_contract.py`.
 - `lib/captions.ts`: pure helpers (time parse/format, validation that mirrors the backend, VTT for the
   preview), unit-tested with `node --test`.
 - `CaptionEditor` keeps an in-browser media preview (object URL of the selected file) with a live VTT `<track>`

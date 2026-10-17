@@ -8,14 +8,19 @@ as 00:01:00,000 rather than an invalid 00:00:59,1000.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Callable, Dict, List
 
 from app.services.captions import Caption
 
+MAX_TIMESTAMP_MS = 99 * 3_600_000 + 59 * 60_000 + 59_999   # 99:59:59.999
+
 
 def _split_ms(seconds: float):
-    total_ms = int(round(max(0.0, seconds) * 1000))
+    # Half-up rounding (same as the frontend's Math.round), clamped to the largest
+    # value both formats can express with a two-digit hour field.
+    total_ms = min(int(math.floor(max(0.0, seconds) * 1000 + 0.5)), MAX_TIMESTAMP_MS)
     hrs, rem = divmod(total_ms, 3_600_000)
     mins, rem = divmod(rem, 60_000)
     secs, ms = divmod(rem, 1000)
@@ -40,7 +45,8 @@ def _clean_lines(text: str) -> List[str]:
 def to_srt(captions: List[Caption]) -> str:
     blocks = []
     for n, cap in enumerate(captions, start=1):
-        body = "\n".join(_clean_lines(cap.text))
+        # SRT has no escaping; a literal "-->" in text can be misread as a timing line.
+        body = "\n".join(line.replace("-->", "->") for line in _clean_lines(cap.text))
         blocks.append(f"{n}\n{format_srt_timestamp(cap.start)} --> "
                       f"{format_srt_timestamp(cap.end)}\n{body}\n")
     return "\n".join(blocks)

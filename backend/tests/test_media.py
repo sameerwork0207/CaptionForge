@@ -78,3 +78,13 @@ def test_ffmpeg_timeout(media, tmp_path, monkeypatch):
     with pytest.raises(MediaError) as ei:
         audio.extract_audio(str(media.speech_mp3), str(tmp_path / "o.wav"), timeout=1)
     assert ei.value.code == "media_timeout"
+
+
+@pytest.mark.parametrize("seconds,text", [(10, "10 seconds"), (10.5, "10.5 seconds"),
+                                          (119, "119 seconds"), (5400, "90 minutes"),
+                                          (10800, "180 minutes"), (750, "12.5 minutes")])
+def test_duration_messages_are_readable(seconds, text):
+    """Regression D11: a 10 s limit used to be reported as 'the maximum is 0 minutes'."""
+    assert audio.format_duration(seconds) == text
+    assert audio.too_long_message(10.5, 10) == \
+        "The media is 10.5 seconds long; the maximum is 10 seconds."

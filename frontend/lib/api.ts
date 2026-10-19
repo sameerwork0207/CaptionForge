@@ -17,6 +17,7 @@ export interface CaptionSegment {
   start: number;
   end: number;
   text: string;
+  id: string | null; // stable within a job; null only for records the server has not upgraded
 }
 
 export interface StatusResponse {
@@ -40,6 +41,7 @@ export interface ResultResponse extends Omit<StatusResponse, "queue_position"> {
   segments: CaptionSegment[] | null;
   srt_content: string | null;
   edited: boolean;
+  revision: number | null;
   model: string | null;
 }
 
@@ -103,7 +105,10 @@ export const getStatus = (id: string) => request<StatusResponse>(`/api/status/${
 export const getResult = (id: string) => request<ResultResponse>(`/api/result/${id}`);
 export const deleteJob = (id: string) => request<void>(`/api/jobs/${id}`, { method: "DELETE" });
 
-export const saveSegments = (id: string, segments: { start: number; end: number; text: string }[]) =>
+export const saveSegments = (
+  id: string,
+  segments: { id?: string | null; start: number; end: number; text: string }[],
+) =>
   request<ResultResponse>(`/api/result/${id}/segments`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },

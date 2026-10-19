@@ -38,7 +38,7 @@ from app.errors import CaptionForgeError, JobCancelledError
 from app.models.job import JobStatus
 from app.pipeline import run_pipeline
 from app.services import subtitles
-from app.services.captions import Caption
+from app.services.captions import Caption, initial_cue_id, new_cue_id
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,43 @@ def _parse_time(value: Any) -> Optional[datetime]:
 
 
 def _caption_dicts(captions: List[Caption]) -> List[dict]:
-    return [{"index": c.index, "start": c.start, "end": c.end, "text": c.text} for c in captions]
+    return [{"index": c.index, "id": c.id, "start": c.start, "end": c.end, "text": c.text}
+            for c in captions]
+
+
+def _backfill_cue_state(record: Dict[str, Any]) -> None:
+    """
+    Give a finished job's captions stable ids and a revision, in place.
+
+    Records written before ids existed have neither. They get the deterministic ids
+    ``c1..cN`` (by position), so reloading the same file after a restart always yields the
+    same ids. ``cue_ids_issued`` remembers every id ever used in the job, so an id of a
+    deleted caption is never handed to a different one. Malformed or duplicate ids are
+    replaced; valid ids are never changed.
+    """
+    segments = record.get("segments")
+    if segments is None:
+        return
+    raw_issued = record.get("cue_ids_issued")
+    issued = {i for i in raw_issued if isinstance(i, str)} if isinstance(raw_issued, list) else set()
+    taken: set = set()
+    for seg in segments:
+        cid = seg.get("id")
+        if isinstance(cid, str) and cid and cid not in taken:
+            taken.add(cid)
+        else:
+            seg["id"] = None
+    for pos, seg in enumerate(segments, start=1):
+        if seg["id"] is None:
+            cid = initial_cue_id(pos)
+            while cid in taken or cid in issued:
+                cid = new_cue_id()
+            seg["id"] = cid
+            taken.add(cid)
+    record["cue_ids_issued"] = sorted(taken | issued)
+    rev = record.get("revision")
+    if not (isinstance(rev, int) and not isinstance(rev, bool) and rev >= 1):
+        record["revision"] = 1
 
 
 INTERRUPTED_ERROR = {"code": "interrupted",
@@ -81,6 +117,11 @@ class JobNotFoundError(CaptionForgeError):
 class QueueFullError(CaptionForgeError):
     code = "queue_full"
     http_status = 503
+
+
+class RevisionConflictError(CaptionForgeError):
+    code = "revision_conflict"
+    http_status = 409
 
 
 class JobManager:
@@ -151,6 +192,7 @@ class JobManager:
             return None
         if _parse_time(record.get("finished_at")) is None and record.get("finished_at") is not None:
             record["finished_at"] = _now()        # unparsable → expire from now
+        _backfill_cue_state(record)
         return record
 
     def _recover(self) -> None:
@@ -242,7 +284,7 @@ class JobManager:
             "created_at": _now(), "updated_at": _now(), "started_at": None,
             "finished_at": None, "language": None, "language_probability": None,
             "duration": None, "transcript": None, "segments": None, "edited": False,
-            "model": self.settings.whisper_model, "error": None,
+            "revision": None, "cue_ids_issued": None, "model": self.settings.whisper_model, "error": None,
         }
         with self._lock:
             self._jobs[job_id] = record
@@ -279,13 +321,36 @@ class JobManager:
         logger.info("Job %s deleted.", job_id)
         return True
 
-    def update_captions(self, job_id: str, captions: List[Caption]) -> Dict[str, Any]:
+    def update_captions(self, job_id: str, captions: List[Caption],
+                        base_revision: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Replace the captions with an edited version and bump the revision.
+
+        Captions that carry the id of an existing caption keep it. Captions without an id,
+        or with an id that is not currently in the job (new, or deleted earlier), get a
+        fresh id; an id that was ever issued is never reused. ``base_revision`` is only
+        checked when given, so clients that do not send it are never rejected.
+        """
         with self._lock:
             rec = self._jobs.get(job_id)
             if rec is None:      # deleted between the route's lookup and now
                 raise JobNotFoundError(f"Job '{job_id}' not found.")
+            revision = rec.get("revision") or 1
+            if base_revision is not None and base_revision != revision:
+                raise RevisionConflictError(
+                    "The captions were changed since you loaded them (revision "
+                    f"{revision}, yours was {base_revision}). Reload before saving.")
+            current = {s.get("id") for s in rec.get("segments") or []} - {None}
+            issued = set(rec.get("cue_ids_issued") or []) | current
+            for cap in captions:
+                if cap.id is None or cap.id not in current:
+                    cap.id = new_cue_id()
+                    while cap.id in issued:
+                        cap.id = new_cue_id()
+                issued.add(cap.id)
             self._write_exports(job_id, captions)
-            self._update(job_id, segments=_caption_dicts(captions), edited=True)
+            self._update(job_id, segments=_caption_dicts(captions), edited=True,
+                         revision=revision + 1, cue_ids_issued=sorted(issued))
             return copy.deepcopy(self._jobs[job_id])
 
     def _write_exports(self, job_id: str, captions: List[Caption]) -> None:
@@ -327,11 +392,14 @@ class JobManager:
                     raise JobCancelledError("deleted")
                 self._update(job_id, stage="exporting")
                 self._write_exports(job_id, result.captions)
+                cue_state = {"segments": _caption_dicts(result.captions)}
+                _backfill_cue_state(cue_state)          # ids c1..cN, revision 1
                 self._update(job_id, status=JobStatus.DONE.value, stage=None, progress=1.0,
                              finished_at=_now(), language=result.language,
                              language_probability=round(result.language_probability, 3),
                              duration=result.duration, transcript=result.transcript,
-                             segments=_caption_dicts(result.captions))
+                             segments=cue_state["segments"], revision=cue_state["revision"],
+                             cue_ids_issued=cue_state["cue_ids_issued"])
             logger.info("Job %s completed: %d captions", job_id, len(result.captions))
         except JobCancelledError:
             with self._lock:

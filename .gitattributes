@@ -1,0 +1,2 @@
+# Golden export files are compared byte for byte; never normalise line endings.
+backend/tests/golden/* -text

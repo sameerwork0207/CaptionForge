@@ -76,7 +76,7 @@ def _result(job: dict, include_srt: bool = True) -> TranscriptionResult:
         language=job.get("language"), language_probability=job.get("language_probability"),
         duration=job.get("duration"), has_video=job.get("has_video"),
         transcript=job.get("transcript"), segments=segments, srt_content=srt,
-        edited=job.get("edited", False), model=job.get("model"),
+        edited=job.get("edited", False), revision=job.get("revision"), model=job.get("model"),
         error=JobError(**job["error"]) if job.get("error") else None,
     )
 
@@ -215,7 +215,8 @@ async def update_segments(request: Request, job_id: str, body: UpdateCaptionsReq
         captions = normalize_edited_captions([s.model_dump() for s in body.segments])
     except CaptionValidationError as exc:
         raise CaptionForgeError(str(exc), code="invalid_captions", http_status=422)
-    updated = await run_in_threadpool(_jobs(request).update_captions, job_id, captions)
+    updated = await run_in_threadpool(_jobs(request).update_captions, job_id, captions,
+                                      body.base_revision)
     return _result(updated)
 
 

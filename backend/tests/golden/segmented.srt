@@ -1,0 +1,18 @@
+1
+00:00:00,000 --> 00:00:01,150
+Welcome to CaptionForge.
+
+2
+00:00:01,200 --> 00:00:05,150
+This short recording is used to
+test automatic speech recognition,
+
+3
+00:00:05,200 --> 00:00:10,360
+and it keeps going for a while
+so that it must be split.
+
+4
+00:00:14,000 --> 00:00:17,160
+After a long pause the
+speaker continues here.

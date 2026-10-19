@@ -1,0 +1,25 @@
+{
+ "job_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+ "status": "done",
+ "stage": null,
+ "progress": 1.0,
+ "filename": "legacy interview.mp3",
+ "language_requested": null,
+ "has_video": false,
+ "created_at": "2026-10-16T09:00:00+00:00",
+ "updated_at": "2026-10-16T09:01:10+00:00",
+ "started_at": "2026-10-16T09:00:01+00:00",
+ "finished_at": "2026-10-16T09:01:10+00:00",
+ "language": "en",
+ "language_probability": 0.98,
+ "duration": 9.0,
+ "transcript": "Welcome to CaptionForge. This is a legacy record. It has no ids.",
+ "segments": [
+  {"index": 1, "start": 0.0, "end": 2.5, "text": "Welcome to CaptionForge."},
+  {"index": 2, "start": 2.6, "end": 5.0, "text": "This is a legacy record.\nTwo lines."},
+  {"index": 3, "start": 5.2, "end": 8.0, "text": "It has no ids."}
+ ],
+ "edited": false,
+ "model": "base",
+ "error": null
+}

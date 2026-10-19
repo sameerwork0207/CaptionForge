@@ -51,6 +51,13 @@ segments, invalid JSON) is skipped with a warning instead of preventing startup.
 **Graceful shutdown** (Ctrl+C) stops the in-flight job at its next segment and records it as
 `error/interrupted`. Pending jobs are not started; they stay on disk and become `interrupted` at the next start.
 A hard kill leads to the same end state through recovery.
+**Caption ids and revisions:** every caption in a finished job has a stable `id` (`c1..cN` when generated, a random
+8-hex id when added later) and the job has an integer `revision` (1 when finished, +1 per saved edit). An id stays with
+its caption through edits and re-ordering and is never reused for another caption: `cue_ids_issued` records every id the
+job has used. `PUT .../segments` accepts optional `id` per caption and an optional `base_revision`; a mismatching
+`base_revision` is rejected with 409 `revision_conflict`, and clients that omit either behave as before. Records written
+before this existed get the deterministic ids `c1..cN` and revision 1 when loaded (the file is not rewritten until the
+next save). Ids and revisions never appear in SRT/VTT; `tests/golden/` pins the default export bytes.
 **Alternatives:** SQLite would add schema and migrations for a handful of fields; a pure in-memory dict
 (original) loses everything on restart. Neither was justified for this scope.
 

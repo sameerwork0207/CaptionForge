@@ -6,6 +6,7 @@ import { deleteJob, downloadFile, saveSegments, type ResultResponse } from "@/li
 
 interface Row extends Cue {
   key: number;
+  id: string | null; // server caption id; null for captions added in this session
   startText: string;
   endText: string;
 }
@@ -14,6 +15,7 @@ let nextKey = 1;
 const toRows = (r: ResultResponse): Row[] =>
   (r.segments ?? []).map((s) => ({
     key: nextKey++,
+    id: s.id,
     start: s.start,
     end: s.end,
     text: s.text,
@@ -79,7 +81,7 @@ export default function CaptionEditor({
       const nextStart = i + 1 < rs.length ? parseTime(rs[i + 1].startText) : null;
       const start = Math.round((prevEnd + 0.05) * 1000) / 1000;
       const end = nextStart !== null ? Math.max(start + 0.1, nextStart - 0.05) : start + 2;
-      const row: Row = { key: nextKey++, start, end, text: "", startText: formatTime(start), endText: formatTime(end) };
+      const row: Row = { key: nextKey++, id: null, start, end, text: "", startText: formatTime(start), endText: formatTime(end) };
       return [...rs.slice(0, i + 1), row, ...rs.slice(i + 1)];
     });
     setDirty(true);
@@ -97,7 +99,10 @@ export default function CaptionEditor({
     setSaving(true);
     setSaveError(null);
     try {
-      const updated = await saveSegments(result.job_id, cues);
+      const updated = await saveSegments(
+        result.job_id,
+        cues.map((c, i) => ({ ...c, id: rows[i].id })),
+      );
       setRows(toRows(updated));
       setDirty(false);
       setSavedAt(new Date().toLocaleTimeString());

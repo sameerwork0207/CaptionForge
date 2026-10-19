@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import secrets
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
@@ -42,6 +43,7 @@ class Caption:
     start: float
     end: float
     text: str   # may contain "\n" between lines
+    id: Optional[str] = None   # stable caption id; assigned by the job manager
 
 
 # ── Line wrapping ────────────────────────────────────────────────────────────
@@ -231,6 +233,16 @@ def build_captions(segments: Sequence[RawSegment],
     return _fix_timing(captions, cfg)
 
 
+def initial_cue_id(position: int) -> str:
+    """Deterministic id for the ``position``-th (1-based) caption of a freshly built job."""
+    return f"c{position}"
+
+
+def new_cue_id() -> str:
+    """Random id for a caption added after the job was built (cannot collide with ``c<N>``)."""
+    return secrets.token_hex(4)
+
+
 class CaptionValidationError(ValueError):
     pass
 
@@ -239,8 +251,11 @@ def normalize_edited_captions(items: Sequence[dict]) -> List[Caption]:
     """
     Validate user-edited captions: non-negative times, end > start, non-empty
     text, no overlaps. Returns captions sorted by start and renumbered.
+    An optional ``id`` is carried through unchanged (the job manager decides whether it
+    is valid); duplicate ids in one request are rejected.
     """
     caps = []
+    seen_ids = set()
     for n, item in enumerate(items, start=1):
         start, end = float(item["start"]), float(item["end"])
         text = "\n".join(l.strip() for l in str(item["text"]).replace("\r\n", "\n").split("\n")
@@ -251,7 +266,15 @@ def normalize_edited_captions(items: Sequence[dict]) -> List[Caption]:
             raise CaptionValidationError(f"Caption {n}: end time must be after start time.")
         if not text:
             raise CaptionValidationError(f"Caption {n}: text cannot be empty.")
-        caps.append(Caption(index=0, start=round(start, 3), end=round(end, 3), text=text))
+        cid = item.get("id")
+        if cid is not None:
+            if not isinstance(cid, str) or not cid:
+                raise CaptionValidationError(f"Caption {n}: id must be a non-empty string.")
+            if cid in seen_ids:
+                raise CaptionValidationError(f"Caption {n}: duplicate caption id '{cid}'.")
+            seen_ids.add(cid)
+        caps.append(Caption(index=0, start=round(start, 3), end=round(end, 3), text=text,
+                            id=cid))
     caps.sort(key=lambda c: (c.start, c.end))
     for i, c in enumerate(caps, start=1):
         c.index = i
